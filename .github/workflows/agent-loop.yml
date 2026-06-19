@@ -1,0 +1,91 @@
+name: Agent Loop Evaluation
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+    inputs:
+      ledger:
+        description: "Path to evidence ledger"
+        required: false
+        default: "evidence-ledger.json"
+      repair:
+        description: "Run bounded repair controller instead of evaluate-only"
+        required: false
+        default: "false"
+        type: choice
+        options: ["false", "true"]
+  workflow_call:
+    inputs:
+      ledger:
+        required: false
+        type: string
+        default: "evidence-ledger.json"
+      repair:
+        required: false
+        type: string
+        default: "false"
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: read
+
+jobs:
+  agent-loop:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install agent-loop toolkit
+        run: python -m pip install -e .
+
+      - name: Resolve ledger path
+        id: ledger
+        shell: bash
+        run: |
+          LEDGER="${{ inputs.ledger || github.event.inputs.ledger || 'evidence-ledger.json' }}"
+          echo "path=$LEDGER" >> "$GITHUB_OUTPUT"
+          if [ ! -f "$LEDGER" ]; then
+            echo "::error::Ledger not found: $LEDGER"
+            exit 1
+          fi
+
+      - name: Capture PR snapshot
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python scripts/ledger_pr_snapshot.py --ledger "${{ steps.ledger.outputs.path }}" --pr "${{ github.event.pull_request.number }}" || true
+
+      - name: Evaluate only
+        if: ${{ (inputs.repair || github.event.inputs.repair || 'false') != 'true' }}
+        run: python scripts/evaluate_agent_loop.py --record --trigger ci "${{ steps.ledger.outputs.path }}"
+
+      - name: Bounded repair controller
+        if: ${{ (inputs.repair || github.event.inputs.repair || 'false') == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HERMES_LEDGER_PATH: ${{ steps.ledger.outputs.path }}
+        run: |
+          python scripts/agent_loop_controller.py "${{ steps.ledger.outputs.path }}" \
+            --max-attempts "${AGENT_LOOP_MAX_ATTEMPTS:-3}" \
+            --max-same-failure-count "${AGENT_LOOP_MAX_SAME_FAILURE_COUNT:-2}" \
+            --max-runtime-minutes "${AGENT_LOOP_MAX_RUNTIME_MINUTES:-30}" \
+            --repair-command "${AGENT_LOOP_REPAIR_COMMAND:-}" \
+            --output-report agent-loop-handoff.md \
+            --comment-pr
+
+      - name: Upload handoff report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-loop-handoff
+          path: agent-loop-handoff.md
+          if-no-files-found: ignore

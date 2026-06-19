@@ -1,0 +1,24 @@
+{
+  "requirements": [
+    {
+      "id": "REQ-001",
+      "text": "Example requirement from issue body",
+      "planned": true,
+      "implemented": false,
+      "evidence": []
+    }
+  ],
+  "tasks": [
+    {
+      "id": "TASK-001",
+      "text": "Implement the example requirement",
+      "requirements": [
+        "REQ-001"
+      ],
+      "implemented": false,
+      "evidence": []
+    }
+  ],
+  "findings": [],
+  "claims": []
+}

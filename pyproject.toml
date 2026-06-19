@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent-loop"
+version = "0.1.0"
+description = "Evidence-backed bounded CI/LLM repair loop toolkit"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[project.scripts]
+agent-loop-evaluate = "hermes_cli.agent_loop_evaluator:main"
+agent-loop-controller = "hermes_cli.agent_loop_controller:main"
+agent-loop-ledger-update = "hermes_cli.agent_loop_ledger_update:main"
+agent-loop-knowledge-record = "hermes_cli.agent_loop_knowledge:main"
+
+[tool.setuptools.packages.find]
+include = ["hermes_cli*"]

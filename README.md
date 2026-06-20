@@ -23,6 +23,7 @@ Evidence-backed autonomous development loop toolkit. This repo contains the file
 - `skills/github/github-issues/`, `github-code-review`, `github-auth`, `github-repo-management` — issue/PR/review/auth/repo operations used by the loop.
 - `skills/autonomous-ai-agents/{codex,claude-code,opencode}/` — optional external coding-agent delegation backends.
 - `.github/workflows/agent-loop.yml` — PR / workflow_dispatch / workflow_call CI gate.
+- `.github/workflows/pr-ci-repair-merge.yml` — manual workflow to repair a PR until CI is green and then merge safely.
 - `tests/cli/` — core unit tests copied from Hermes Agent.
 
 ## Quick start

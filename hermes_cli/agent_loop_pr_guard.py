@@ -132,7 +132,7 @@ def load_pr_with_gh(pr_number: str | None = None) -> dict[str, Any]:
     merge guard relies on.
     """
 
-    fields = "number,title,url,isDraft,mergeable,reviewDecision,statusCheckRollup"
+    fields = "number,title,url,isDraft,mergeable,reviewDecision,headRefName,baseRefName,statusCheckRollup"
     command = ["gh", "pr", "view"]
     if pr_number:
         command.append(str(pr_number))

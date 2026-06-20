@@ -17,6 +17,7 @@ agent-loop-evaluate = "hermes_cli.agent_loop_evaluator:main"
 agent-loop-controller = "hermes_cli.agent_loop_controller:main"
 agent-loop-ledger-update = "hermes_cli.agent_loop_ledger_update:main"
 agent-loop-knowledge-record = "hermes_cli.agent_loop_knowledge:main"
+agent-loop-pr-merge-guard = "hermes_cli.agent_loop_pr_guard:main"
 
 [tool.setuptools.packages.find]
 include = ["hermes_cli*"]

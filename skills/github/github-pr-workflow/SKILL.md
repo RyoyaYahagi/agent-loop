@@ -156,11 +156,12 @@ Some teams have strict PR workflow rules. When a user provides such rules, embed
 5. Never push to main
 6. Push working branches only after local tests/lint/typecheck pass
 7. Create Draft PR after first push
-8. PR body includes: purpose, changes, tests run, remaining tasks, points for human review
+8. PR body must be Japanese-first and include only human-review-critical points: purpose/scope, design decisions, key diffs, tests/CI, risk classification, and points requiring human judgment
 9. After Draft PR creation, check CI results and diff, then send to AI review
-10. Merge to develop (agent-managed), never to main
-11. Humans handle develop→main merge only
-12. After PR merge, clean up both remote and local branches immediately:
+10. Never merge while CI is failing, pending, or missing; use branch protection and/or `scripts/pr_merge_guard.py` before any automated merge
+11. Merge to develop (agent-managed), never to main
+12. Humans handle develop→main merge only
+13. After PR merge, clean up both remote and local branches immediately:
     git switch develop
     git pull
     git branch -d <branch>

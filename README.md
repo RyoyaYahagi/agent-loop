@@ -9,10 +9,13 @@ Evidence-backed autonomous development loop toolkit. This repo contains the file
 - `hermes_cli/agent_loop_controller.py` — bounded repair controller with max attempts, repeated-failure stop, runtime limit, and handoff report.
 - `hermes_cli/agent_loop_ledger_update.py` — deterministic semantic ledger updater for requirements/tasks/findings/claims.
 - `hermes_cli/agent_loop_knowledge.py` — failure/pattern/decision/handoff knowledge capture so lessons accumulate as repo assets.
+- `hermes_cli/agent_loop_pr_guard.py` — fail-closed guard that blocks AI PR merges when CI/checks are failing, pending, or missing.
 - `scripts/*.py` — CLI wrappers for the above.
 - `templates/evidence-ledger.json` — starter ledger.
 - `templates/knowledge-entry.md` — reviewable knowledge entry template.
+- `templates/pr-body-human-review-ja.md` — Japanese PR body focused on points humans must review.
 - `docs/knowledge-asset-design.md` — design for converting failures and lessons into durable project knowledge.
+- `docs/pr-human-review-ja.md` — Japanese PR review summary and CI merge-gate policy.
 - `skills/software-development/agent-loop-evaluation/` — evidence ledger, deterministic evaluation, bounded repair, and handoff rules.
 - `skills/software-development/subagent-driven-development/` — autonomous implementation loop: plan → subagent implementation → spec review → quality review → final verification.
 - `skills/github/github-pr-workflow/` — branch → commit → draft PR → CI → AI review → merge/cleanup loop.
@@ -84,6 +87,23 @@ python scripts/agent_loop_controller.py evidence-ledger.json --comment-pr
 
 If attempts are exhausted, the same failure repeats, runtime expires, permissions/secrets are missing, or the repair command is absent, the controller exits with escalation and writes `agent-loop-handoff.md`. In PR CI it can also comment the handoff on the PR when `gh` and `GH_TOKEN` are available.
 
+## Japanese PR review summaries
+
+AI-authored PRs should include a Japanese review summary that shows only the points humans must judge: problem/scope, architecture decisions, responsibility boundaries, test adequacy, high-risk diffs, and production/customer impact. Use:
+
+```bash
+cp templates/pr-body-human-review-ja.md /tmp/pr-body.md
+gh pr create --draft --body-file /tmp/pr-body.md
+```
+
+Before any automated merge, run the fail-closed PR guard:
+
+```bash
+python scripts/pr_merge_guard.py <PR_NUMBER>
+```
+
+The guard blocks when the PR is Draft, checks are failing/pending/missing, GitHub reports `mergeable=false`, or optional review approval is required but missing. See `docs/pr-human-review-ja.md` for the full policy.
+
 ## Ledger updates
 
 Apply structured annotations without trusting them as proof:
@@ -129,3 +149,4 @@ The orchestration code should be comment-rich where it matters. Add docstrings/c
 - Completion claims need evidence. Unsupported or contradicted completion claims fail.
 - Fixed findings need recheck evidence.
 - The repair controller is bounded and hands off to humans instead of infinite looping.
+# agent-loop

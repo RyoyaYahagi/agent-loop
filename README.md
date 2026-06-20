@@ -10,6 +10,7 @@ Evidence-backed autonomous development loop toolkit. This repo contains the file
 - `hermes_cli/agent_loop_ledger_update.py` — deterministic semantic ledger updater for requirements/tasks/findings/claims.
 - `hermes_cli/agent_loop_knowledge.py` — failure/pattern/decision/handoff knowledge capture so lessons accumulate as repo assets.
 - `hermes_cli/agent_loop_pr_guard.py` — fail-closed guard that blocks AI PR merges when CI/checks are failing, pending, or missing.
+- `hermes_cli/agent_loop_pr_ci_loop.py` — bounded loop that repairs an AI PR until CI is green, then safely merges allowed base branches.
 - `scripts/*.py` — CLI wrappers for the above.
 - `templates/evidence-ledger.json` — starter ledger.
 - `templates/knowledge-entry.md` — reviewable knowledge entry template.
@@ -104,6 +105,23 @@ python scripts/pr_merge_guard.py <PR_NUMBER>
 
 The guard blocks when the PR is Draft, checks are failing/pending/missing, GitHub reports `mergeable=false`, or optional review approval is required but missing. See `docs/pr-human-review-ja.md` for the full policy.
 
+To keep fixing until CI is green and then merge, run the bounded CI repair loop:
+
+```bash
+python scripts/pr_ci_repair_merge.py <PR_NUMBER> \
+  --repair-command 'hermes chat -q "Fix PR {pr} CI failure. Attempt {attempt}. Check CI logs, patch only the needed files, run local checks, commit, and push."' \
+  --max-attempts 3 \
+  --allowed-base develop
+```
+
+Safety defaults:
+
+- it does not merge until `pr_merge_guard` proves checks are green;
+- it treats missing checks as failure, not success;
+- it stops after bounded attempts and hands off to humans;
+- it only auto-merges into `develop` or `staging` by default;
+- it will not auto-merge into `main` unless `--allow-main` is explicitly set.
+
 ## Ledger updates
 
 Apply structured annotations without trusting them as proof:
@@ -149,5 +167,6 @@ The orchestration code should be comment-rich where it matters. Add docstrings/c
 - Completion claims need evidence. Unsupported or contradicted completion claims fail.
 - Fixed findings need recheck evidence.
 - The repair controller is bounded and hands off to humans instead of infinite looping.
+# agent-loop
 # agent-loop
 # agent-loop

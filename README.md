@@ -1,32 +1,33 @@
 # agent-loop
 
-Evidence-backed autonomous development loop toolkit. This repo contains the files needed to run a deterministic agent-loop evaluator, capture machine evidence, optionally invoke a bounded LLM repair loop in CI, and stop with a human handoff instead of looping forever.
+エビデンスに基づく自律開発ループツールキット。決定論的なエージェントループ評価器の実行、機械エビデンスの収集、CI上での有界LLM修復ループの起動、そして無限ループではなく人間へのハンドオフで停止するために必要なファイルをまとめたリポジトリです。
 
-## What is included
+## 含まれるもの
 
-- `hermes_cli/agent_loop_capture.py` — ledger init, command evidence, git snapshot, PR snapshot, repair status helpers.
-- `hermes_cli/agent_loop_evaluator.py` — deterministic evaluator and hard gates.
-- `hermes_cli/agent_loop_controller.py` — bounded repair controller with max attempts, repeated-failure stop, runtime limit, and handoff report.
-- `hermes_cli/agent_loop_ledger_update.py` — deterministic semantic ledger updater for requirements/tasks/findings/claims.
-- `hermes_cli/agent_loop_knowledge.py` — failure/pattern/decision/handoff knowledge capture so lessons accumulate as repo assets.
-- `hermes_cli/agent_loop_pr_guard.py` — fail-closed guard that blocks AI PR merges when CI/checks are failing, pending, or missing.
-- `hermes_cli/agent_loop_pr_ci_loop.py` — bounded loop that repairs an AI PR until CI is green, then safely merges allowed base branches.
-- `scripts/*.py` — CLI wrappers for the above.
-- `templates/evidence-ledger.json` — starter ledger.
-- `templates/knowledge-entry.md` — reviewable knowledge entry template.
-- `templates/pr-body-human-review-ja.md` — Japanese PR body focused on points humans must review.
-- `docs/knowledge-asset-design.md` — design for converting failures and lessons into durable project knowledge.
-- `docs/pr-human-review-ja.md` — Japanese PR review summary and CI merge-gate policy.
-- `skills/software-development/agent-loop-evaluation/` — evidence ledger, deterministic evaluation, bounded repair, and handoff rules.
-- `skills/software-development/subagent-driven-development/` — autonomous implementation loop: plan → subagent implementation → spec review → quality review → final verification.
-- `skills/github/github-pr-workflow/` — branch → commit → draft PR → CI → AI review → merge/cleanup loop.
-- `skills/github/github-issues/`, `github-code-review`, `github-auth`, `github-repo-management` — issue/PR/review/auth/repo operations used by the loop.
-- `skills/autonomous-ai-agents/{codex,claude-code,opencode}/` — optional external coding-agent delegation backends.
-- `.github/workflows/agent-loop.yml` — PR / workflow_dispatch / workflow_call CI gate.
-- `.github/workflows/pr-ci-repair-merge.yml` — manual workflow to repair a PR until CI is green and then merge safely.
-- `tests/cli/` — core unit tests copied from Hermes Agent.
+- `hermes_cli/agent_loop_capture.py` — 台帳の初期化、コマンドエビデンス、gitスナップショット、PRスナップショット、修復ステータスのヘルパー
+- `hermes_cli/agent_loop_evaluator.py` — 決定論的評価器とハードゲート
+- `hermes_cli/agent_loop_controller.py` — 最大試行回数・繰り返し失敗停止・実行時間制限・ハンドオフレポートを備えた有界修復コントローラー
+- `hermes_cli/agent_loop_ledger_update.py` — 要件/タスク/発見事項/クレームの決定論的セマンティック台帳アップデーター
+- `hermes_cli/agent_loop_knowledge.py` — 失敗・パターン・決定・ハンドオフのナレッジキャプチャ（教訓をリポジトリ資産として蓄積）
+- `hermes_cli/agent_loop_pr_guard.py` — CI/チェックが失敗・保留・未設定のときにAI PRのマージをブロックするフェイルクローズドガード
+- `hermes_cli/agent_loop_pr_ci_loop.py` — CIがグリーンになるまでAI PRを修復し、許可されたベースブランチに安全にマージする有界ループ
+- `scripts/*.py` — 上記のCLIラッパー
+- `templates/evidence-ledger.json` — スターター台帳
+- `templates/knowledge-entry.md` — レビュー可能なナレッジエントリテンプレート
+- `templates/pr-body-human-review-ja.md` — 人間がレビューすべき観点に絞った日本語PRボディ
+- `docs/knowledge-asset-design.md` — 失敗と教訓を永続的なプロジェクトナレッジに変換するための設計
+- `docs/pr-human-review-ja.md` — 日本語PRレビューサマリーとCIマージゲートポリシー
+- `docs/non-functional-requirements-ja.md` — 非機能要件チェックリスト（保守性・性能・可用性・セキュリティ・運用性・統制・拡張性ほか）
+- `skills/software-development/agent-loop-evaluation/` — エビデンス台帳・決定論的評価・有界修復・ハンドオフルール
+- `skills/software-development/subagent-driven-development/` — 自律実装ループ: 計画 → サブエージェント実装 → 仕様レビュー → 品質レビュー → 最終検証
+- `skills/github/github-pr-workflow/` — ブランチ → コミット → ドラフトPR → CI → AIレビュー → マージ/クリーンアップのループ
+- `skills/github/github-issues/`, `github-code-review`, `github-auth`, `github-repo-management` — ループで使用するissue/PR/レビュー/認証/リポジトリ操作
+- `skills/autonomous-ai-agents/{codex,claude-code,opencode}/` — オプションの外部コーディングエージェント委譲バックエンド
+- `.github/workflows/agent-loop.yml` — PR / workflow_dispatch / workflow_call のCIゲート
+- `.github/workflows/pr-ci-repair-merge.yml` — CIがグリーンになるまでPRを修復してから安全にマージする手動ワークフロー
+- `tests/cli/` — Hermes Agentからコピーしたコアユニットテスト
 
-## Quick start
+## クイックスタート
 
 ```bash
 cd /path/to/your/repo
@@ -51,62 +52,62 @@ python /home/yappa/dev/app/agent-loop/scripts/ledger_git_snapshot.py --ledger ev
 python /home/yappa/dev/app/agent-loop/scripts/evaluate_agent_loop.py --record --trigger local evidence-ledger.json
 ```
 
-## CI modes
+## CIモード
 
-### Evaluate-only gate
+### 評価のみゲート
 
-The workflow fails the PR if the deterministic evaluator returns `FAIL`. The LLM does not decide pass/fail.
+決定論的評価器が `FAIL` を返した場合、ワークフローはPRを失敗させます。LLMがpass/failを判断することはありません。
 
-### Bounded repair mode
+### 有界修復モード
 
-Manual or reusable workflow runs can set `repair=true`. The controller:
+手動またはreusableワークフローで `repair=true` を設定して実行します。コントローラーの動作:
 
-1. evaluates the ledger,
-2. builds a repair prompt from deterministic `repair_tasks`,
-3. invokes one configured repair command,
-4. re-evaluates,
-5. stops on success or escalates to humans when any limit is reached.
+1. 台帳を評価する
+2. 決定論的な `repair_tasks` から修復プロンプトを生成する
+3. 設定した修復コマンドを1回実行する
+4. 再評価する
+5. 成功したら停止、いずれかの上限に達したら人間にエスカレーション
 
-Limits default to:
+デフォルトの上限:
 
 - `AGENT_LOOP_MAX_ATTEMPTS=3`
 - `AGENT_LOOP_MAX_SAME_FAILURE_COUNT=2`
 - `AGENT_LOOP_MAX_RUNTIME_MINUTES=30`
 
-Set `AGENT_LOOP_REPAIR_COMMAND` to the command that should consume the generated prompt. The controller exposes:
+`AGENT_LOOP_REPAIR_COMMAND` に生成されたプロンプトを受け取るコマンドを設定します。コントローラーが公開する環境変数:
 
 - `HERMES_LEDGER_PATH`
 - `HERMES_AGENT_LOOP_REPAIR_PROMPT_FILE`
 - `HERMES_AGENT_LOOP_REPAIR_ATTEMPT`
 - `HERMES_AGENT_LOOP_PHASE`
 
-Example:
+実行例:
 
 ```bash
 AGENT_LOOP_REPAIR_COMMAND='hermes chat -q "$(cat $HERMES_AGENT_LOOP_REPAIR_PROMPT_FILE)"' \
 python scripts/agent_loop_controller.py evidence-ledger.json --comment-pr
 ```
 
-If attempts are exhausted, the same failure repeats, runtime expires, permissions/secrets are missing, or the repair command is absent, the controller exits with escalation and writes `agent-loop-handoff.md`. In PR CI it can also comment the handoff on the PR when `gh` and `GH_TOKEN` are available.
+試行回数が尽きた場合、同じ失敗が繰り返された場合、実行時間が切れた場合、権限/シークレットが不足している場合、または修復コマンドがない場合、コントローラーはエスカレーションで終了し `agent-loop-handoff.md` を書き出します。PR CI内では `gh` と `GH_TOKEN` が利用可能な場合、PRにハンドオフをコメントすることもできます。
 
-## Japanese PR review summaries
+## 日本語PRレビューサマリー
 
-AI-authored PRs should include a Japanese review summary that shows only the points humans must judge: problem/scope, architecture decisions, responsibility boundaries, test adequacy, high-risk diffs, and production/customer impact. Use:
+AI作成のPRには、人間が判断すべき観点（問題/スコープ、アーキテクチャ決定、責任境界、テストの妥当性、高リスクdiff、本番/顧客への影響）のみを示した日本語レビューサマリーを含める必要があります。使い方:
 
 ```bash
 cp templates/pr-body-human-review-ja.md /tmp/pr-body.md
 gh pr create --draft --body-file /tmp/pr-body.md
 ```
 
-Before any automated merge, run the fail-closed PR guard:
+自動マージの前に、フェイルクローズドPRガードを実行してください:
 
 ```bash
 python scripts/pr_merge_guard.py <PR_NUMBER>
 ```
 
-The guard blocks when the PR is Draft, checks are failing/pending/missing, GitHub reports `mergeable=false`, or optional review approval is required but missing. See `docs/pr-human-review-ja.md` for the full policy.
+PRがドラフト状態の場合、チェックが失敗/保留/未設定の場合、GitHubが `mergeable=false` を報告する場合、またはオプションのレビュー承認が必要だが未取得の場合にブロックします。完全なポリシーは `docs/pr-human-review-ja.md` を参照してください。
 
-To keep fixing until CI is green and then merge, run the bounded CI repair loop:
+CIがグリーンになるまで修復を続けてからマージするには、有界CI修復ループを実行します:
 
 ```bash
 python scripts/pr_ci_repair_merge.py <PR_NUMBER> \
@@ -115,59 +116,56 @@ python scripts/pr_ci_repair_merge.py <PR_NUMBER> \
   --allowed-base develop
 ```
 
-Safety defaults:
+安全のデフォルト設定:
 
-- it does not merge until `pr_merge_guard` proves checks are green;
-- it treats missing checks as failure, not success;
-- it stops after bounded attempts and hands off to humans;
-- it only auto-merges into `develop` or `staging` by default;
-- it will not auto-merge into `main` unless `--allow-main` is explicitly set.
+- `pr_merge_guard` がチェックのグリーンを確認するまでマージしない
+- チェック未設定は成功ではなく失敗として扱う
+- 有界試行回数の後に停止し、人間にハンドオフする
+- デフォルトでは `develop` または `staging` へのみ自動マージ
+- `--allow-main` を明示的に設定しない限り `main` への自動マージは行わない
 
-## Ledger updates
+## 台帳の更新
 
-Apply structured annotations without trusting them as proof:
+証明として信頼せずに構造化アノテーションを適用する:
 
 ```bash
 python scripts/ledger_update.py --ledger evidence-ledger.json --updates examples/semantic-updates.json
 ```
 
-The updater marks semantic entries as annotation. Machine evidence still must come from wrappers/CI/tooling.
+アップデーターはセマンティックエントリをアノテーションとしてマークします。機械エビデンスは引き続きラッパー/CI/ツールから取得する必要があります。
 
-## Knowledge assets
+## ナレッジ資産
 
-Failures and durable lessons can be promoted into `.agent-loop/knowledge/` as Markdown files plus a small `index.json`. These knowledge assets are intentionally separate from evaluator evidence: they can guide future agents, but they cannot make the current run pass.
+失敗と永続的な教訓は `.agent-loop/knowledge/` にMarkdownファイルと小さな `index.json` として昇格できます。これらのナレッジ資産は評価器エビデンスとは意図的に分離されています: 将来のエージェントを導くことはできますが、現在の実行をpassにすることはできません。
 
-Record a human-authored lesson:
+人間が書いた教訓を記録する:
 
 ```bash
 python scripts/knowledge_record.py \
   --repo-root . \
   --type pattern \
-  --title "Authenticated Next.js pages require force-dynamic" \
-  --summary "Pages that call getCurrentUser() must export dynamic = force-dynamic." \
-  --prevention "Check new authenticated pages before pushing." \
+  --title "認証済みNext.jsページはforce-dynamicが必要" \
+  --summary "getCurrentUser()を呼ぶページはdynamic = force-dynamicをエクスポートする必要がある。" \
+  --prevention "プッシュ前に新しい認証済みページを確認する。" \
   --tag nextjs --tag ci
 ```
 
-Create a failure candidate from the latest ledger evaluation:
+最新の台帳評価から失敗候補を作成する:
 
 ```bash
 python scripts/knowledge_record.py --repo-root . --ledger evidence-ledger.json
 ```
 
-See `docs/knowledge-asset-design.md` for promotion rules, storage layout, and the comment policy.
+昇格ルール、ストレージレイアウト、コメントポリシーについては `docs/knowledge-asset-design.md` を参照してください。
 
-## Code comment policy
+## コードコメントポリシー
 
-The orchestration code should be comment-rich where it matters. Add docstrings/comments that explain why a class or function exists, what authority it has, what failure mode it prevents, and what must not be trusted. Avoid comments that merely restate the next line of code.
+オーケストレーションコードは重要な箇所でコメントを充実させるべきです。クラスや関数が存在する理由、持つ権限、防ぐ障害モード、信頼してはいけないものを説明するdocstring/コメントを追加してください。次のコード行を言い換えるだけのコメントは避けてください。
 
-## Hard rules
+## ハードルール
 
-- AI self-report is not evidence.
-- Required checks must be machine-captured with command, cwd, commit, exit code, stdout/stderr logs, and `source: machine`.
-- Completion claims need evidence. Unsupported or contradicted completion claims fail.
-- Fixed findings need recheck evidence.
-- The repair controller is bounded and hands off to humans instead of infinite looping.
-# agent-loop
-# agent-loop
-# agent-loop
+- AIの自己申告はエビデンスではない
+- 必須チェックはコマンド・cwd・コミット・終了コード・stdout/stderrログ・`source: machine` とともに機械的に収集する必要がある
+- 完了クレームにはエビデンスが必要。根拠のない、または矛盾する完了クレームは失敗する
+- 修正済み発見事項には再チェックエビデンスが必要
+- 修復コントローラーは有界であり、無限ループではなく人間にハンドオフする

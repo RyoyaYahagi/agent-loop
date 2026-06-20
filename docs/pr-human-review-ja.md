@@ -58,6 +58,34 @@ PR merge の前に次を満たすこと:
 
 agent-loop 側では `scripts/pr_merge_guard.py` を使い、GitHub の PR 状態・check 状態を機械的に確認する。
 
+## CIが通るまで修正してからマージするループ
+
+`pr_merge_guard.py` は単発の安全確認。AI が CI failure を直し切ってから merge する運用には `scripts/pr_ci_repair_merge.py` を使う。
+
+```bash
+python scripts/pr_ci_repair_merge.py <PR_NUMBER> \
+  --repair-command 'hermes chat -q "Fix PR {pr} CI failure. Attempt {attempt}. Check CI logs, patch only the needed files, run local checks, commit, and push."' \
+  --max-attempts 3 \
+  --allowed-base develop
+```
+
+動作:
+
+1. `gh pr view` で PR/check 状態を取得
+2. checks が pending なら bounded wait
+3. checks が failing/missing なら repair command を1回実行
+4. repair command が commit/push した後、再度 PR/check 状態を確認
+5. green になったら `gh pr merge --squash --delete-branch`
+6. 最大試行回数で green にならなければ停止して人間にバトンタッチ
+
+安全条件:
+
+- checks missing は green ではないため merge しない
+- CI/check が1つでも failure/pending なら merge しない
+- default では `develop` / `staging` だけ自動 merge 可能
+- `main` への自動 merge は default 禁止。明示的に `--allow-main` が必要
+- `--require-review-approval` を付けると reviewDecision=APPROVED も必須
+
 ## PR本文の書き方
 
 悪い例:

@@ -16,7 +16,25 @@ def _write_ledger(tmp_path: Path, data: dict) -> Path:
 
 def _passing_ledger() -> dict:
     return {
+        "schema_version": 2,
         "loop_run_id": "issue-1-test",
+        "scope": {
+            "required_checks": [
+                {"id": "CHECK-001", "command_argv": ["pytest", "tests/cli/test_agent_loop_evaluator.py", "-q"], "cwd": ".", "timeout": None, "type": "unit-tests"}
+            ],
+            "required_status_checks": [],
+        },
+        "machine_evidence": {
+            "git_snapshots": [
+                {
+                    "id": "GIT-001",
+                    "source": "machine",
+                    "head_commit": "abc123",
+                    "dirty": False,
+                }
+            ],
+            "pr_snapshots": [],
+        },
         "requirements": [
             {
                 "id": "REQ-001",
@@ -46,6 +64,7 @@ def _passing_ledger() -> dict:
                 "cwd": ".",
                 "branch": "feature/test",
                 "commit": "abc123",
+                "timed_out": False,
                 "evidence": {
                     "stdout_log": "logs/CHECK-001.stdout.log",
                     "stderr_log": "logs/CHECK-001.stderr.log",
@@ -71,7 +90,11 @@ def _passing_ledger() -> dict:
                 "evidence": ["CHECK-001"],
             }
         ],
-        "regressions": {"new_failures": 0},
+        "evaluations": [],
+        "repairs": [],
+        "usage_events": [],
+        "ai_decision_logs": [],
+        "regressions": {"source": "machine", "new_failures": 0, "head_commit": "abc123"},
     }
 
 
@@ -97,7 +120,7 @@ def test_missing_required_check_blocks_completion_and_generates_repair(tmp_path)
 
     assert result.verdict == "FAIL"
     assert any(f.metric == "check_execution_rate" for f in result.blocking_failures)
-    assert any("Run the missing required check" in task.instruction for task in result.repair_tasks)
+    assert any("controller" in task.instruction for task in result.repair_tasks)
 
 
 def test_contradicted_completion_claim_is_fail_closed(tmp_path):

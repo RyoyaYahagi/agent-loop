@@ -20,7 +20,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Sequence
 
-from hermes_cli.agent_loop_capture import append_evaluation_result, record_repair_task_status, save_ledger, utc_now
+from hermes_cli.agent_loop_capture import (
+    append_evaluation_result,
+    capture_git_snapshot,
+    load_ledger as capture_load_ledger,
+    normalize_required_checks,
+    record_repair_task_status,
+    run_logged_check,
+    save_ledger,
+    utc_now,
+)
+from hermes_cli.agent_loop_decision_log import record_ai_decision
 from hermes_cli.agent_loop_evaluator import EvaluationResult, evaluate_ledger, load_ledger
 from hermes_cli.agent_loop_knowledge import KnowledgeEntry, record_knowledge_entry
 
@@ -76,7 +86,7 @@ def build_repair_prompt(
 Hard rules:
 - The deterministic evaluator is the source of truth; do not claim COMPLETE unless it returns PASS.
 - Execute only the repair tasks below. Do not do broad refactors or unrelated work.
-- Record machine evidence for checks with scripts/ledger_run.py or the terminal auto-wrapper.
+- Do not record machine evidence for checks yourself. The controller reruns declared required checks and captures git snapshots.
 - If a requirement is ambiguous, a secret/permission is missing, or a critical risk appears, stop and report that human handoff is required.
 - Keep the Evidence Ledger at {ledger_path} updated with requirements, tasks, findings, claims, checks, and repair lifecycle evidence.
 
@@ -92,7 +102,7 @@ Blocking failures:
 Deterministic repair tasks:
 {_format_repair_tasks(result)}
 
-After repairs, rerun the relevant checks and the evaluator. If repair is impossible or unsafe, leave clear notes in the ledger and final output for human handoff.
+After repairs, leave code and ledger annotations ready for the controller verification pass. If repair is impossible or unsafe, leave clear notes in the ledger and final output for human handoff.
 """.strip() + "\n"
 
 
@@ -164,6 +174,70 @@ def _record_controller_event(
     save_ledger(ledger_path, ledger)
 
 
+def _record_controller_decision(
+    ledger_path: Path,
+    *,
+    phase: str,
+    decision: str,
+    rationale: str,
+    evidence_refs: Sequence[str] = (),
+    risks: Sequence[str] = (),
+) -> None:
+    """Record a concise controller decision without affecting evaluator truth.
+
+    Controller decisions are audit trail annotations. They explain why the loop
+    repaired, passed, or escalated, but machine evidence and evaluator gates keep
+    final authority.
+    """
+
+    record_ai_decision(
+        ledger_path=ledger_path,
+        phase=phase,
+        actor="controller",
+        decision=decision,
+        rationale=rationale,
+        evidence_refs=evidence_refs,
+        risks=risks,
+        confidence="high",
+    )
+
+
+def run_verification_pass(
+    *,
+    ledger_path: Path,
+    check_cwd: Path,
+    regression_base_ref: str | None = None,
+    regression_test_command: str | None = None,
+) -> None:
+    ledger = capture_load_ledger(ledger_path)
+    scope = ledger.get("scope") if isinstance(ledger.get("scope"), dict) else {}
+    required_checks = normalize_required_checks(scope.get("required_checks") if isinstance(scope, dict) else [], default_cwd=check_cwd)
+    for check in required_checks:
+        command = check.get("command_argv")
+        if not command:
+            continue
+        run_logged_check(
+            ledger_path=ledger_path,
+            check_id=str(check["id"]),
+            check_type=str(check.get("type") or "command"),
+            command=command,
+            cwd=check.get("cwd") or check_cwd,
+            required=True,
+            timeout=check.get("timeout"),
+        )
+    if regression_base_ref and regression_test_command:
+        from hermes_cli.agent_loop_regression import compute_regressions_for_git
+
+        compute_regressions_for_git(
+            ledger_path=ledger_path,
+            cwd=check_cwd,
+            base_ref=regression_base_ref,
+            test_command=regression_test_command,
+        )
+    base_ref = scope.get("base_ref") if isinstance(scope, dict) else None
+    capture_git_snapshot(ledger_path=ledger_path, cwd=check_cwd, base_ref=str(base_ref) if base_ref else None)
+
+
 def _run_repair_command(
     *,
     command: str,
@@ -214,6 +288,9 @@ def run_controller(
     output_report: Path | None = None,
     trigger_prefix: str = "repair_controller",
     comment_pr: bool = False,
+    check_cwd: Path | None = None,
+    regression_base_ref: str | None = None,
+    regression_test_command: str | None = None,
 ) -> int:
     start = time.monotonic()
     repair_command = repair_command if repair_command is not None else _default_repair_command()
@@ -222,11 +299,43 @@ def run_controller(
     last_result: EvaluationResult | None = None
 
     for attempt in range(1, limits.max_attempts + 1):
-        result = evaluate_ledger(load_ledger(ledger_path))
+        verification_cwd = check_cwd or ledger_path.parent
+        try:
+            run_verification_pass(
+                ledger_path=ledger_path,
+                check_cwd=verification_cwd,
+                regression_base_ref=regression_base_ref,
+                regression_test_command=regression_test_command,
+            )
+            result = evaluate_ledger(load_ledger(ledger_path))
+        except json.JSONDecodeError as exc:
+            dummy = EvaluationResult(
+                verdict="FAIL",
+                score=0.0,
+                metrics={},
+                blocking_failures=[],
+                repair_tasks=[],
+            )
+            return _escalate(
+                ledger_path=ledger_path,
+                result=dummy,
+                reason=f"ledger JSON parse failed: {exc}",
+                attempts=attempt,
+                same_failure_count=same_failure_count,
+                output_report=output_report,
+                comment_pr=comment_pr,
+            )
         last_result = result
         append_evaluation_result(ledger_path=ledger_path, result=result, trigger=f"{trigger_prefix}_attempt_{attempt}")
 
         if result.verdict == "PASS":
+            _record_controller_decision(
+                ledger_path,
+                phase=f"{trigger_prefix}_attempt_{attempt}",
+                decision="Report PASS and stop repair loop",
+                rationale=f"Deterministic evaluator returned PASS with score {result.score}/100.",
+                evidence_refs=[f"evaluations[{len(load_ledger(ledger_path).get('evaluations', [])) - 1}]"],
+            )
             _record_controller_event(
                 ledger_path,
                 event="pass",
@@ -287,6 +396,14 @@ def run_controller(
 
         prompt = build_repair_prompt(ledger_path=ledger_path, result=result, attempt=attempt, limits=limits)
         prompt_path = _write_prompt_file(ledger_path, prompt, attempt)
+        _record_controller_decision(
+            ledger_path,
+            phase=f"repair_attempt_{attempt}",
+            decision="Run bounded repair command for evaluator failures",
+            rationale="Evaluator returned FAIL, limits were not exceeded, and a repair command is configured.",
+            evidence_refs=[str(prompt_path)],
+            risks=["Repair command may fail or be unable to address ambiguous requirements; controller will re-evaluate after the attempt."],
+        )
         _mark_repairs(result, ledger_path=ledger_path, status="started", notes=f"controller attempt {attempt}")
         print(f"Evaluator FAIL; running repair attempt {attempt}/{limits.max_attempts - 1} with prompt {prompt_path}")
         try:
@@ -445,6 +562,14 @@ def _escalate(
     if output_report:
         output_report.parent.mkdir(parents=True, exist_ok=True)
         output_report.write_text(report, encoding="utf-8")
+    _record_controller_decision(
+        ledger_path,
+        phase="escalation",
+        decision="Stop repair loop and hand off to a human",
+        rationale=f"Controller hit a hard stop condition: {reason}.",
+        evidence_refs=[str(output_report) if output_report else "handoff_report:inline"],
+        risks=["Further autonomous repair could loop indefinitely or make unsafe changes without human judgment."],
+    )
     knowledge_result = _record_escalation_knowledge(
         ledger_path=ledger_path,
         result=result,
@@ -491,6 +616,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output-report", type=Path, help="Write human handoff markdown here on escalation")
     parser.add_argument("--comment-pr", action="store_true", help="Post the human handoff report as a PR comment with gh CLI on escalation")
     parser.add_argument("--trigger-prefix", default="repair_controller")
+    parser.add_argument("--check-cwd", type=Path, help="Working directory for controller-owned required checks. Defaults to ledger parent.")
+    parser.add_argument("--regression-base-ref")
+    parser.add_argument("--regression-test-command")
     return parser
 
 
@@ -513,6 +641,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         output_report=args.output_report,
         trigger_prefix=args.trigger_prefix,
         comment_pr=args.comment_pr,
+        check_cwd=args.check_cwd,
+        regression_base_ref=args.regression_base_ref,
+        regression_test_command=args.regression_test_command,
     )
 
 

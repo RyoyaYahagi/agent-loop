@@ -18,7 +18,7 @@ from hermes_cli.agent_loop_capture import load_ledger, save_ledger, utc_now
 LEDGER_LISTS = {
     "requirements": {"required": {"id", "text"}, "allowed": {"id", "text", "planned", "implemented", "evidence", "source", "notes", "tasks", "checks"}},
     "tasks": {"required": {"id", "text"}, "allowed": {"id", "text", "requirements", "implemented", "evidence", "source", "notes", "paths", "checks"}},
-    "findings": {"required": {"id", "source", "severity", "status"}, "allowed": {"id", "source", "severity", "status", "text", "evidence", "fix_evidence", "recheck_evidence", "reason", "notes"}},
+    "findings": {"required": {"id", "source", "severity", "status"}, "allowed": {"id", "source", "severity", "status", "text", "evidence", "fix_evidence", "recheck_evidence", "reason", "approved_by", "notes"}},
     "claims": {"required": {"id", "text", "kind", "status"}, "allowed": {"id", "text", "kind", "status", "evidence", "source", "notes"}},
 }
 
@@ -85,6 +85,13 @@ def _validate_entry(kind: str, entry: Mapping[str, Any], *, strict: bool = True)
             if value not in allowed:
                 raise ValueError(f"{kind}.{field} must be one of: {', '.join(sorted(allowed))}")
             normalized[field] = value
+
+    if kind == "findings" and str(normalized.get("status", "")).lower() in {"accepted_risk", "deferred"}:
+        approved_by = str(normalized.get("approved_by") or "").strip()
+        reason = str(normalized.get("reason") or "").strip()
+        disallowed = {"ai", "agent", "assistant", "llm", "claude", "controller", "bot"}
+        if not approved_by or approved_by.lower() in disallowed or not reason:
+            raise ValueError("findings accepted_risk/deferred require human approved_by and non-empty reason")
 
     # Mark non-machine semantic updates as annotations. This is intentionally
     # not accepted as machine check evidence by the evaluator.

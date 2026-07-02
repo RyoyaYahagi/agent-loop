@@ -66,7 +66,13 @@ jobs:
 
       - name: Evaluate only
         if: ${{ (inputs.repair || github.event.inputs.repair || 'false') != 'true' }}
-        run: python scripts/evaluate_agent_loop.py --record --trigger ci "${{ steps.ledger.outputs.path }}"
+        run: |
+          python scripts/evaluate_agent_loop.py \
+            --record --trigger ci \
+            --output agent-loop-report.md \
+            --json-output agent-loop-report.json \
+            --summary-output run-summary.json \
+            "${{ steps.ledger.outputs.path }}"
 
       - name: Bounded repair controller
         if: ${{ (inputs.repair || github.event.inputs.repair || 'false') == 'true' }}
@@ -86,6 +92,27 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: agent-loop-handoff
-          path: agent-loop-handoff.md
+          name: agent-loop-evidence
+          path: |
+            ${{ steps.ledger.outputs.path }}
+            logs/
+            .agent-loop/
+            agent-loop-report.md
+            agent-loop-report.json
+            run-summary.json
+            agent-loop-handoff.md
           if-no-files-found: ignore
+
+      - name: Comment evaluation summary
+        if: always() && github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          if [ -f run-summary.json ]; then
+            SHA=$(python -c 'import json; print(json.load(open("run-summary.json")).get("ledger_sha256", ""))')
+            VERDICT=$(python -c 'import json; print(json.load(open("run-summary.json")).get("verdict", ""))')
+            gh pr comment "${{ github.event.pull_request.number }}" --body "agent-loop verdict: ${VERDICT}
+
+ledger_sha256: ${SHA}"
+          fi

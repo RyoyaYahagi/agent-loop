@@ -23,6 +23,10 @@ on:
         default: "false"
         type: choice
         options: ["false", "true"]
+      ledger:
+        description: "Optional evidence ledger path for required status checks and audit log"
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -54,8 +58,22 @@ jobs:
           if [ "${{ inputs.require_review_approval }}" = "true" ]; then
             EXTRA_ARGS+=(--require-review-approval)
           fi
+          if [ -n "${{ inputs.ledger }}" ]; then
+            EXTRA_ARGS+=(--ledger "${{ inputs.ledger }}")
+          fi
           python scripts/pr_ci_repair_merge.py "${{ inputs.pr }}" \
             --repair-command "${{ inputs.repair_command }}" \
             --max-attempts "${{ inputs.max_attempts }}" \
             --allowed-base "${{ inputs.allowed_base }}" \
             "${EXTRA_ARGS[@]}"
+
+      - name: Upload PR guard evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr-ci-repair-merge-evidence
+          path: |
+            ${{ inputs.ledger }}
+            logs/
+            .agent-loop/
+          if-no-files-found: ignore

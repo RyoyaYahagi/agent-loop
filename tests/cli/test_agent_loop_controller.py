@@ -10,20 +10,31 @@ def _write_failing_check_ledger(path: Path) -> None:
     path.write_text(
         json.dumps(
             {
-                "requirements": [],
+                "schema_version": 2,
+                "loop_run_id": "test-run",
+                "scope": {
+                    "required_checks": [
+                        {
+                            "id": "CHECK-001",
+                            "command_argv": [sys.executable, "-c", "raise SystemExit(1)"],
+                            "cwd": str(path.parent),
+                            "timeout": 10,
+                            "type": "unit-tests",
+                        }
+                    ],
+                    "required_status_checks": [],
+                },
+                "machine_evidence": {"git_snapshots": [], "pr_snapshots": []},
+                "requirements": [{"id": "REQ-001", "text": "test", "planned": True, "implemented": True, "evidence": ["x"]}],
                 "tasks": [],
-                "checks": [
-                    {
-                        "id": "CHECK-001",
-                        "type": "unit-tests",
-                        "command": "pytest",
-                        "required": True,
-                        "executed": False,
-                    }
-                ],
+                "checks": [],
                 "findings": [],
-                "claims": [],
-                "regressions": {"new_failures": 0},
+                "claims": [{"id": "CLAIM-001", "text": "complete", "kind": "completion", "status": "verified", "evidence": ["CHECK-001"]}],
+                "evaluations": [],
+                "repairs": [],
+                "usage_events": [],
+                "ai_decision_logs": [],
+                "regressions": {"source": "machine", "new_failures": 0, "head_commit": None},
             }
         ),
         encoding="utf-8",
@@ -44,8 +55,8 @@ def test_repair_prompt_includes_hard_limits_and_tasks(tmp_path):
 
     assert "deterministic evaluator is the source of truth" in prompt
     assert "Attempt: 1/3" in prompt
-    assert "check_execution_rate" in prompt
-    assert "scripts/ledger_run.py" in prompt
+    assert "declared_checks_executed" in prompt
+    assert "controller reruns declared required checks" in prompt
 
 
 def test_controller_escalates_without_repair_command_and_writes_handoff_report(tmp_path):
@@ -86,20 +97,7 @@ stdout_log.parent.mkdir(parents=True, exist_ok=True)
 stdout_log.write_text("ok\\n", encoding="utf-8")
 stderr_log.write_text("", encoding="utf-8")
 ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
-ledger["checks"] = [{
-    "id": "CHECK-001",
-    "type": "unit-tests",
-    "command": "pytest",
-    "required": True,
-    "executed": True,
-    "exit_code": 0,
-    "source": "machine",
-    "cwd": str(ledger_path.parent),
-    "evidence": {
-        "stdout_log": "logs/CHECK-001.stdout.log",
-        "stderr_log": "logs/CHECK-001.stderr.log",
-    },
-}]
+ledger["scope"]["required_checks"][0]["command_argv"] = [r'''""" + sys.executable + """''', "-c", "print('ok')"]
 ledger_path.write_text(json.dumps(ledger), encoding="utf-8")
 """.strip(),
         encoding="utf-8",

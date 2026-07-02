@@ -9,7 +9,10 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shlex
 import subprocess
+import sys
+import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -36,7 +39,69 @@ def load_ledger(path: str | Path) -> dict[str, Any]:
 def save_ledger(path: str | Path, ledger: Mapping[str, Any]) -> None:
     ledger_path = Path(path)
     ledger_path.parent.mkdir(parents=True, exist_ok=True)
-    ledger_path.write_text(json.dumps(ledger, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    payload = json.dumps(ledger, indent=2, ensure_ascii=False) + "\n"
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=ledger_path.parent, delete=False) as handle:
+        tmp_path = Path(handle.name)
+        handle.write(payload)
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(tmp_path, ledger_path)
+
+
+def normalize_required_checks(
+    required_checks: Sequence[Any] | None,
+    *,
+    default_cwd: str | Path | None = None,
+) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
+    for raw in required_checks or []:
+        if isinstance(raw, Mapping):
+            check_id = str(raw.get("id") or "").strip()
+            if not check_id:
+                raise ValueError("required check object must include id")
+            command_argv = raw.get("command_argv")
+            if command_argv is not None and (
+                not isinstance(command_argv, list) or not all(isinstance(part, str) for part in command_argv)
+            ):
+                raise ValueError(f"required check {check_id} command_argv must be a list of strings")
+            entry = {
+                "id": check_id,
+                "command_argv": list(command_argv) if command_argv is not None else None,
+                "cwd": str(raw.get("cwd") or default_cwd or "."),
+                "timeout": raw.get("timeout"),
+                "type": str(raw.get("type") or "command"),
+            }
+            if entry["timeout"] is not None:
+                entry["timeout"] = int(entry["timeout"])
+            normalized.append(entry)
+            continue
+        if isinstance(raw, str):
+            text = raw.strip()
+            if not text:
+                continue
+            if ":" in text:
+                check_id, command_text = text.split(":", 1)
+                check_id = check_id.strip()
+                if not check_id:
+                    raise ValueError("required check id cannot be empty")
+                normalized.append(
+                    {
+                        "id": check_id,
+                        "command_argv": shlex.split(command_text),
+                        "cwd": str(default_cwd or "."),
+                        "timeout": None,
+                        "type": "command",
+                    }
+                )
+            else:
+                print(
+                    f"warning: required check {text!r} is declaration-only and cannot be run by the controller",
+                    file=sys.stderr,
+                )
+                normalized.append({"id": text, "command_argv": None, "cwd": str(default_cwd or "."), "timeout": None, "type": "command"})
+            continue
+        raise ValueError("required_checks entries must be strings or objects")
+    return normalized
 
 
 def initialize_ledger(
@@ -50,6 +115,7 @@ def initialize_ledger(
     base_ref: str | None = None,
     start_commit: str | None = None,
     required_checks: Sequence[str] | None = None,
+    required_status_checks: Sequence[str] | None = None,
     deliverables: Sequence[str] | None = None,
     overwrite: bool = False,
 ) -> dict[str, Any]:
@@ -57,6 +123,7 @@ def initialize_ledger(
 
     ledger_file = Path(ledger_path)
     ledger = {} if overwrite else load_ledger(ledger_file)
+    ledger["schema_version"] = 2
     ledger["loop_run_id"] = loop_run_id
     scope = ledger.setdefault("scope", {})
     if not isinstance(scope, dict):
@@ -69,7 +136,8 @@ def initialize_ledger(
             "branch": branch,
             "base_ref": base_ref,
             "start_commit": start_commit,
-            "required_checks": list(required_checks or []),
+            "required_checks": normalize_required_checks(required_checks, default_cwd=ledger_file.parent),
+            "required_status_checks": list(required_status_checks or scope.get("required_status_checks") or []),
             "deliverables": list(deliverables or []),
             "initialized_at": scope.get("initialized_at") or utc_now(),
         }
@@ -78,7 +146,7 @@ def initialize_ledger(
         value = ledger.setdefault(key, [])
         if not isinstance(value, list):
             raise ValueError(f"ledger.{key} must be a list")
-    ledger.setdefault("regressions", {"new_failures": 0})
+    ledger.setdefault("regressions", {})
     if not isinstance(ledger["regressions"], dict):
         raise ValueError("ledger.regressions must be an object")
     machine = ledger.setdefault("machine_evidence", {})
@@ -314,12 +382,25 @@ def _git_value(args: Sequence[str], cwd: Path) -> str | None:
     return value or None
 
 
-def git_context(cwd: str | Path) -> dict[str, Any]:
+def _excluded_status_lines(lines: Sequence[str], exclude_paths: Sequence[str]) -> list[str]:
+    clean_excludes = [path.rstrip("/") for path in exclude_paths if path]
+    kept: list[str] = []
+    for line in lines:
+        path = line[3:] if len(line) > 3 else line
+        if any(path == exclude or path.startswith(exclude + "/") for exclude in clean_excludes):
+            continue
+        kept.append(line)
+    return kept
+
+
+def git_context(cwd: str | Path, *, exclude_paths: Sequence[str] = ()) -> dict[str, Any]:
     path = Path(cwd).resolve()
+    status_raw = _git_value(["status", "--porcelain"], path) or ""
+    status_lines = _excluded_status_lines(status_raw.splitlines(), exclude_paths)
     return {
         "branch": _git_value(["branch", "--show-current"], path),
         "commit": _git_value(["rev-parse", "HEAD"], path),
-        "dirty": bool(_git_value(["status", "--porcelain"], path)),
+        "dirty": bool(status_lines),
     }
 
 
@@ -356,26 +437,38 @@ def run_logged_check(
     run_cwd = Path(cwd).resolve()
     started_at = utc_now()
     started = time.monotonic()
-    completed = runner(
-        list(command),
-        cwd=run_cwd,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        check=False,
-    )
+    timed_out = False
+    try:
+        completed = runner(
+            list(command),
+            cwd=run_cwd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+        stdout = completed.stdout or ""
+        stderr = completed.stderr or ""
+        exit_code: int | None = completed.returncode
+    except subprocess.TimeoutExpired as exc:
+        timed_out = True
+        stdout = (exc.stdout or "").decode() if isinstance(exc.stdout, bytes) else (exc.stdout or "")
+        stderr = (exc.stderr or "").decode() if isinstance(exc.stderr, bytes) else (exc.stderr or "")
+        stderr += f"\nTimed out after {timeout} seconds.\n"
+        exit_code = None
     ended_at = utc_now()
     duration_seconds = round(time.monotonic() - started, 4)
 
     log_dir = ledger_file.parent / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     safe_id = "".join(char if char.isalnum() or char in {"-", "_"} else "_" for char in check_id)
-    stdout_log = log_dir / f"{safe_id}.stdout.log"
-    stderr_log = log_dir / f"{safe_id}.stderr.log"
-    stdout_log.write_text(completed.stdout or "", encoding="utf-8")
-    stderr_log.write_text(completed.stderr or "", encoding="utf-8")
+    epoch_ms = int(time.time() * 1000)
+    stdout_log = log_dir / f"{safe_id}.{epoch_ms}.stdout.log"
+    stderr_log = log_dir / f"{safe_id}.{epoch_ms}.stderr.log"
+    stdout_log.write_text(stdout, encoding="utf-8")
+    stderr_log.write_text(stderr, encoding="utf-8")
 
-    context = git_context(run_cwd)
+    context = git_context(run_cwd, exclude_paths=[_relative_to_ledger(ledger_file, ledger_file), "logs", ".agent-loop"])
     check_entry = {
         "id": check_id,
         "type": check_type,
@@ -383,7 +476,8 @@ def run_logged_check(
         "command_argv": list(command),
         "required": required,
         "executed": True,
-        "exit_code": completed.returncode,
+        "exit_code": exit_code,
+        "timed_out": timed_out,
         "source": "machine",
         "cwd": str(run_cwd),
         "branch": context["branch"],
@@ -404,7 +498,7 @@ def run_logged_check(
         raise ValueError("ledger.checks must be a list")
     _upsert_by_id(checks, check_entry)
     save_ledger(ledger_file, ledger)
-    return int(completed.returncode)
+    return 124 if timed_out else int(exit_code or 0)
 
 
 def capture_git_snapshot(
@@ -412,6 +506,7 @@ def capture_git_snapshot(
     ledger_path: str | Path,
     cwd: str | Path = ".",
     base_ref: str | None = None,
+    exclude_paths: Sequence[str] | None = None,
 ) -> dict[str, Any]:
     """Append a machine-collected git snapshot to the ledger."""
 
@@ -428,7 +523,10 @@ def capture_git_snapshot(
     else:
         changed_files = changed_files_raw.splitlines()
     diff_stat = _git_value(["diff", "--stat", base_ref or "HEAD"], run_cwd)
-    dirty = bool(_git_value(["status", "--porcelain"], run_cwd))
+    excludes = list(exclude_paths or [])
+    excludes.extend([_relative_to_ledger(ledger_file, ledger_file), "logs", ".agent-loop"])
+    status_raw = _git_value(["status", "--porcelain"], run_cwd) or ""
+    dirty = bool(_excluded_status_lines(status_raw.splitlines(), excludes))
 
     snapshot = {
         "id": f"GIT-{int(time.time() * 1000)}",
@@ -440,6 +538,7 @@ def capture_git_snapshot(
         "base_ref": base_ref,
         "base_commit": base_commit,
         "dirty": dirty,
+        "exclude_paths": excludes,
         "changed_files": changed_files,
         "diff_stat": diff_stat or "",
     }
@@ -465,7 +564,7 @@ def capture_pr_snapshot(
 ) -> dict[str, Any]:
     """Capture GitHub PR source-of-truth metadata using gh CLI."""
 
-    fields = "number,title,body,state,isDraft,mergeable,reviewDecision,headRefName,baseRefName,additions,deletions,changedFiles,files,commits,statusCheckRollup,url,updatedAt"
+    fields = "number,title,body,state,isDraft,mergeable,reviewDecision,headRefName,headRefOid,baseRefName,additions,deletions,changedFiles,files,commits,statusCheckRollup,url,updatedAt"
     completed = runner(
         ["gh", "pr", "view", str(pr), "--json", fields],
         cwd=Path(cwd).resolve(),
@@ -509,6 +608,8 @@ def build_init_parser() -> argparse.ArgumentParser:
     parser.add_argument("--base-ref")
     parser.add_argument("--start-commit")
     parser.add_argument("--required-check", action="append", default=[])
+    parser.add_argument("--required-check-json", action="append", default=[])
+    parser.add_argument("--required-status-check", action="append", default=[])
     parser.add_argument("--deliverable", action="append", default=[])
     parser.add_argument("--overwrite", action="store_true")
     return parser
@@ -525,7 +626,8 @@ def init_main(argv: list[str] | None = None) -> int:
         branch=args.branch,
         base_ref=args.base_ref,
         start_commit=args.start_commit,
-        required_checks=args.required_check,
+        required_checks=[*args.required_check, *(json.loads(item) for item in args.required_check_json)],
+        required_status_checks=args.required_status_check,
         deliverables=args.deliverable,
         overwrite=args.overwrite,
     )

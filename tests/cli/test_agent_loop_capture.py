@@ -24,7 +24,7 @@ def test_initialize_ledger_records_loop_metadata_and_required_checks(tmp_path):
         pr="456",
         branch="feature/issue-123",
         base_ref="develop",
-        required_checks=["unit-tests", "typecheck"],
+        required_checks=["CHECK-unit:pytest -q", "typecheck"],
         deliverables=["API", "tests"],
     )
 
@@ -35,14 +35,18 @@ def test_initialize_ledger_records_loop_metadata_and_required_checks(tmp_path):
     assert ledger["scope"]["pr"] == "456"
     assert ledger["scope"]["branch"] == "feature/issue-123"
     assert ledger["scope"]["base_ref"] == "develop"
-    assert ledger["scope"]["required_checks"] == ["unit-tests", "typecheck"]
+    assert ledger["schema_version"] == 2
+    assert ledger["scope"]["required_checks"][0]["id"] == "CHECK-unit"
+    assert ledger["scope"]["required_checks"][0]["command_argv"] == ["pytest", "-q"]
+    assert ledger["scope"]["required_checks"][1]["id"] == "typecheck"
+    assert ledger["scope"]["required_checks"][1]["command_argv"] is None
     assert ledger["scope"]["deliverables"] == ["API", "tests"]
     assert ledger["requirements"] == []
     assert ledger["tasks"] == []
     assert ledger["checks"] == []
     assert ledger["findings"] == []
     assert ledger["claims"] == []
-    assert ledger["regressions"] == {"new_failures": 0}
+    assert ledger["regressions"] == {}
     assert ledger["machine_evidence"] == {"git_snapshots": [], "pr_snapshots": []}
     assert ledger["evaluations"] == []
     assert ledger["repairs"] == []

@@ -19,6 +19,13 @@ agent-loop-ledger-update = "hermes_cli.agent_loop_ledger_update:main"
 agent-loop-knowledge-record = "hermes_cli.agent_loop_knowledge:main"
 agent-loop-pr-merge-guard = "hermes_cli.agent_loop_pr_guard:main"
 agent-loop-pr-ci-repair-merge = "hermes_cli.agent_loop_pr_ci_loop:main"
+agent-loop-ledger-init = "hermes_cli.agent_loop_capture:init_main"
+agent-loop-ledger-run = "hermes_cli.agent_loop_capture:run_main"
+agent-loop-ledger-git-snapshot = "hermes_cli.agent_loop_capture:git_main"
+agent-loop-ledger-pr-snapshot = "hermes_cli.agent_loop_capture:pr_main"
+agent-loop-ledger-repair = "hermes_cli.agent_loop_capture:repair_main"
+agent-loop-ledger-decision = "hermes_cli.agent_loop_decision_log:main"
+agent-loop-regression = "hermes_cli.agent_loop_regression:main"
 
 [tool.setuptools.packages.find]
 include = ["hermes_cli*"]

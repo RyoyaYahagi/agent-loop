@@ -1,12 +1,25 @@
 {
+  "schema_version": 2,
   "loop_run_id": "issue-000-example",
-  "target": {
+  "scope": {
     "repo": "owner/repo",
-    "issue": 0,
-    "pull_request": null,
+    "issue": "0",
+    "pr": null,
     "branch": "feature/issue-000-example",
+    "base_ref": "origin/main",
     "start_commit": null,
-    "end_commit": null
+    "required_checks": [
+      {
+        "id": "CHECK-test",
+        "command_argv": ["pytest", "-q"],
+        "cwd": ".",
+        "timeout": 600,
+        "type": "unit-tests"
+      }
+    ],
+    "required_status_checks": ["test"],
+    "deliverables": [],
+    "initialized_at": null
   },
   "machine_evidence": {
     "git_snapshots": [],
@@ -29,50 +42,20 @@
       "evidence": []
     }
   ],
-  "checks": [
-    {
-      "id": "CHECK-001",
-      "type": "unit-tests",
-      "command": "python scripts/ledger_run.py --ledger evidence-ledger.json --check-id CHECK-001 --type unit-tests -- pytest tests/path -q",
-      "command_argv": ["pytest", "tests/path", "-q"],
-      "required": true,
-      "executed": false,
-      "exit_code": null,
-      "source": "machine",
-      "cwd": null,
-      "branch": null,
-      "commit": null,
-      "dirty": null,
-      "started_at": null,
-      "ended_at": null,
-      "duration_seconds": null,
-      "evidence": {
-        "stdout_log": "",
-        "stderr_log": ""
-      }
-    }
-  ],
-  "findings": [
-    {
-      "id": "FINDING-001",
-      "source": "spec-review",
-      "severity": "important",
-      "description": "Describe the issue found by a check/review",
-      "status": "unresolved",
-      "fix_evidence": [],
-      "recheck_evidence": []
-    }
-  ],
+  "checks": [],
+  "findings": [],
   "claims": [
     {
       "id": "CLAIM-001",
-      "text": "Describe one atomic AI claim, e.g. 'typecheck passed'",
+      "text": "Describe one atomic completion claim",
       "kind": "completion",
       "status": "unsupported",
       "evidence": []
     }
   ],
-  "regressions": {
-    "new_failures": 0
-  }
+  "evaluations": [],
+  "repairs": [],
+  "usage_events": [],
+  "ai_decision_logs": [],
+  "regressions": {}
 }

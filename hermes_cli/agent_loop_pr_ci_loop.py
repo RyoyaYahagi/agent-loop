@@ -22,9 +22,11 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Mapping, Sequence
 
-from hermes_cli.agent_loop_pr_guard import GuardResult, evaluate_pr_state, load_pr_with_gh, render_japanese_report
+from hermes_cli.agent_loop_decision_log import record_ai_decision
+from hermes_cli.agent_loop_pr_guard import GuardResult, evaluate_pr_state, load_pr_with_gh, render_japanese_report, required_checks_from_ledger
 
 DEFAULT_ALLOWED_BASES = ("develop", "staging")
 
@@ -41,6 +43,7 @@ class CiRepairMergeLimits:
     max_attempts: int = 3
     poll_interval_seconds: int = 30
     max_wait_seconds: int = 900
+    missing_rollup_grace_seconds: int = 300
 
 
 @dataclass(frozen=True)
@@ -88,7 +91,7 @@ def run_repair_command(command: str, *, pr_number: str, attempt: int, timeout_se
     return completed.returncode
 
 
-def merge_pr(pr_number: str, *, method: str = "squash", delete_branch: bool = True, auto: bool = False) -> None:
+def merge_pr(pr_number: str, *, method: str = "squash", delete_branch: bool = True, auto: bool = False, match_head_commit: str | None = None) -> None:
     """Merge the PR using gh after all machine checks are green."""
 
     command = ["gh", "pr", "merge", str(pr_number), f"--{method}"]
@@ -96,24 +99,69 @@ def merge_pr(pr_number: str, *, method: str = "squash", delete_branch: bool = Tr
         command.append("--delete-branch")
     if auto:
         command.append("--auto")
+    if not match_head_commit:
+        raise RuntimeError("refusing to merge without guard head_sha")
+    command.extend(["--match-head-commit", match_head_commit])
     completed = subprocess.run(command, capture_output=True, text=True, check=False)
     if completed.returncode != 0:
         raise RuntimeError(completed.stderr.strip() or completed.stdout.strip() or f"gh exited {completed.returncode}")
 
 
-def wait_for_non_pending_state(pr_number: str, *, safety: MergeSafety, limits: CiRepairMergeLimits) -> tuple[dict, GuardResult]:
+def _record_ci_decision(
+    ledger_path: str | Path | None,
+    *,
+    phase: str,
+    decision: str,
+    rationale: str,
+    evidence_refs: Sequence[str] = (),
+    risks: Sequence[str] = (),
+) -> None:
+    """Best-effort audit log for CI repair/merge decisions.
+
+    CI repair can be run without a ledger, so decision logging is optional. When
+    a ledger is provided, every consequential choice is appended as annotation.
+    """
+
+    if not ledger_path:
+        return
+    record_ai_decision(
+        ledger_path=ledger_path,
+        phase=phase,
+        actor="ci-repair-merge-loop",
+        decision=decision,
+        rationale=rationale,
+        evidence_refs=evidence_refs,
+        risks=risks,
+        confidence="high",
+    )
+
+
+def wait_for_non_pending_state(pr_number: str, *, safety: MergeSafety, limits: CiRepairMergeLimits, required_checks: Sequence[str] = ()) -> tuple[dict, GuardResult]:
     """Poll PR state until checks are green/failing/missing or the wait limit expires."""
 
     deadline = time.monotonic() + limits.max_wait_seconds
+    missing_deadline = time.monotonic() + limits.missing_rollup_grace_seconds
     last_pr = load_pr_with_gh(pr_number)
-    last_result = evaluate_pr_state(last_pr, require_review_approval=safety.require_review_approval)
+    last_result = evaluate_pr_state(last_pr, require_review_approval=safety.require_review_approval, required_checks=required_checks)
     while time.monotonic() < deadline:
-        pending_only = any("未完了" in reason for reason in last_result.reasons)
-        if last_result.allowed or not pending_only:
+        if last_result.missing_required and time.monotonic() >= missing_deadline:
+            return last_pr, GuardResult(
+                False,
+                (*last_result.reasons, "required check rollup grace window exceeded"),
+                "マージ禁止: 必須checkがrollupに現れませんでした。",
+                status="blocked",
+                pending_checks=last_result.pending_checks,
+                failing_checks=last_result.failing_checks,
+                missing_required=last_result.missing_required,
+                skipped_required=last_result.skipped_required,
+                head_sha=last_result.head_sha,
+                mergeable=last_result.mergeable,
+            )
+        if last_result.status != "pending":
             return last_pr, last_result
         time.sleep(limits.poll_interval_seconds)
         last_pr = load_pr_with_gh(pr_number)
-        last_result = evaluate_pr_state(last_pr, require_review_approval=safety.require_review_approval)
+        last_result = evaluate_pr_state(last_pr, require_review_approval=safety.require_review_approval, required_checks=required_checks)
     return last_pr, last_result
 
 
@@ -127,6 +175,8 @@ def run_ci_repair_merge_loop(
     merge_method: str,
     delete_branch: bool,
     auto_merge: bool,
+    ledger_path: str | Path | None = None,
+    required_checks: Sequence[str] = (),
 ) -> int:
     """Repair until CI passes, then optionally merge.
 
@@ -136,28 +186,73 @@ def run_ci_repair_merge_loop(
     """
 
     for attempt in range(0, limits.max_attempts + 1):
-        pr, guard = wait_for_non_pending_state(pr_number, safety=safety, limits=limits)
+        pr, guard = wait_for_non_pending_state(pr_number, safety=safety, limits=limits, required_checks=required_checks)
         print(render_japanese_report(guard, pr))
 
         if guard.allowed:
             allowed, reason = base_branch_allowed(pr, safety)
             if not allowed:
+                _record_ci_decision(
+                    ledger_path,
+                    phase="merge_guard",
+                    decision="Block automatic merge after green checks",
+                    rationale=reason,
+                    evidence_refs=[f"pr:{pr_number}"],
+                    risks=["Automatic merge target is outside configured safety policy."],
+                )
                 print(f"⛔ 自動マージ禁止: {reason}", file=sys.stderr)
                 return 1
             if merge:
-                merge_pr(pr_number, method=merge_method, delete_branch=delete_branch, auto=auto_merge)
+                _record_ci_decision(
+                    ledger_path,
+                    phase="merge_guard",
+                    decision=f"Merge PR after green checks using {merge_method}",
+                    rationale="Merge guard allowed the PR, GitHub checks are green, and base branch safety policy passed.",
+                    evidence_refs=[f"pr:{pr_number}", "github_statusCheckRollup"],
+                )
+                merge_pr(pr_number, method=merge_method, delete_branch=delete_branch, auto=auto_merge, match_head_commit=guard.head_sha)
                 print(f"✅ CI green確認後にPR #{pr_number} を {merge_method} merge しました。")
             else:
+                _record_ci_decision(
+                    ledger_path,
+                    phase="merge_guard",
+                    decision="Stop after green checks without merging",
+                    rationale="Merge guard allowed the PR, but caller passed --no-merge.",
+                    evidence_refs=[f"pr:{pr_number}", "github_statusCheckRollup"],
+                )
                 print(f"✅ CI green確認済みです。--no-merge のためmergeは実行していません。")
             return 0
 
         if attempt >= limits.max_attempts:
+            _record_ci_decision(
+                ledger_path,
+                phase="ci_repair_escalation",
+                decision="Stop CI repair loop and hand off to human",
+                rationale=f"Maximum repair attempts reached ({limits.max_attempts}) while PR checks were still not green.",
+                evidence_refs=[f"pr:{pr_number}", "github_statusCheckRollup"],
+                risks=["More autonomous repair attempts could loop or broaden changes without review."],
+            )
             print("⛔ 最大修正回数に到達しました。人間にバトンタッチしてください。", file=sys.stderr)
             return 1
         if not repair_command:
+            _record_ci_decision(
+                ledger_path,
+                phase="ci_repair_escalation",
+                decision="Stop CI repair loop because no repair command is configured",
+                rationale="PR checks are not green and the loop has no command that can make a repair attempt.",
+                evidence_refs=[f"pr:{pr_number}", "github_statusCheckRollup"],
+            )
             print("⛔ repair command が未設定です。自動修正できないため人間にバトンタッチしてください。", file=sys.stderr)
             return 1
 
+        _record_ci_decision(
+            ledger_path,
+            phase=f"ci_repair_attempt_{attempt + 1}",
+            decision="Run repair command because CI/checks are not green",
+            rationale="Merge guard did not allow the PR: " + "; ".join(guard.reasons),
+            evidence_refs=[f"pr:{pr_number}", "github_statusCheckRollup"],
+            risks=["Repair command may fail or require human interpretation of CI logs."],
+        )
         print(f"CI/checksがgreenではありません。修正 attempt {attempt + 1}/{limits.max_attempts} を実行します。")
         returncode = run_repair_command(
             repair_command,
@@ -178,6 +273,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-attempts", type=int, default=3)
     parser.add_argument("--poll-interval-seconds", type=int, default=30)
     parser.add_argument("--max-wait-seconds", type=int, default=900)
+    parser.add_argument("--missing-rollup-grace-seconds", type=int, default=300)
     parser.add_argument("--allowed-base", action="append", default=[], help="Base branch automation may merge into. Repeatable. Defaults: develop, staging")
     parser.add_argument("--allow-main", action="store_true", help="Allow automatic merge into main. Off by default.")
     parser.add_argument("--require-review-approval", action="store_true")
@@ -185,6 +281,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-delete-branch", action="store_true")
     parser.add_argument("--auto-merge", action="store_true", help="Use gh pr merge --auto after guard passes")
     parser.add_argument("--no-merge", action="store_true", help="Stop after green check without merging")
+    parser.add_argument("--ledger", default=os.getenv("HERMES_LEDGER_PATH"), help="Optional evidence-ledger.json path for AI decision audit logs")
+    parser.add_argument("--required-check", action="append", default=[], help="Required GitHub status/check name. Repeatable")
     return parser
 
 
@@ -198,6 +296,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise SystemExit("--max-wait-seconds must be >= 1")
 
     allowed_bases = tuple(args.allowed_base) if args.allowed_base else DEFAULT_ALLOWED_BASES
+    required_checks = [*args.required_check]
+    if args.ledger:
+        required_checks.extend(required_checks_from_ledger(args.ledger))
     return run_ci_repair_merge_loop(
         pr_number=args.pr,
         repair_command=args.repair_command or None,
@@ -205,6 +306,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             max_attempts=args.max_attempts,
             poll_interval_seconds=args.poll_interval_seconds,
             max_wait_seconds=args.max_wait_seconds,
+            missing_rollup_grace_seconds=args.missing_rollup_grace_seconds,
         ),
         safety=MergeSafety(
             allowed_base_branches=allowed_bases,
@@ -215,6 +317,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         merge_method=args.merge_method,
         delete_branch=not args.no_delete_branch,
         auto_merge=args.auto_merge,
+        ledger_path=args.ledger,
+        required_checks=required_checks,
     )
 
 

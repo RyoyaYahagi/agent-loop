@@ -1,4 +1,5 @@
 import json
+import sys
 from pathlib import Path
 
 from hermes_cli.agent_loop_capture import (
@@ -142,7 +143,7 @@ def test_run_logged_check_records_machine_check_logs_and_exit_code(tmp_path):
         ledger_path=ledger_path,
         check_id="CHECK-001",
         check_type="unit-tests",
-        command=["python", "-c", "print('ok')"],
+        command=[sys.executable, "-c", "print('ok')"],
         cwd=tmp_path,
     )
 
@@ -154,7 +155,7 @@ def test_run_logged_check_records_machine_check_logs_and_exit_code(tmp_path):
     assert check["executed"] is True
     assert check["exit_code"] == 0
     assert check["cwd"] == str(tmp_path)
-    assert check["command"] == "python -c \"print('ok')\""
+    assert check["command"] == f"{sys.executable} -c \"print('ok')\""
     assert check["evidence"]["stdout_log"]
     assert (tmp_path / check["evidence"]["stdout_log"]).read_text(encoding="utf-8") == "ok\n"
     assert (tmp_path / check["evidence"]["stderr_log"]).exists()

@@ -136,6 +136,19 @@ Start from `templates/evidence-ledger.json` in this skill directory. Minimum sha
       "evidence": ["CHECK-001"]
     }
   ],
+  "ai_decision_logs": [
+    {
+      "id": "DECISION-001",
+      "phase": "repair_attempt_1",
+      "actor": "controller",
+      "decision": "Run bounded repair command for evaluator failures",
+      "rationale": "Evaluator returned FAIL, limits were not exceeded, and a repair command is configured.",
+      "evidence_refs": ["evaluations[0]"],
+      "risks": [],
+      "confidence": "high",
+      "source": "annotation"
+    }
+  ],
   "regressions": {"new_failures": 0}
 }
 ```
@@ -168,6 +181,31 @@ Start from `templates/evidence-ledger.json` in this skill directory. Minimum sha
 - **Recheck Rate fails:** Rerun the original check for each fixed finding.
 - **Claim Verification fails:** Provide evidence or downgrade/remove the claim.
 - **Contradicted Claim exists:** Correct the report and keep the run failed until evidence verifies the corrected claim.
+
+## AI Decision Logs
+
+Record important AI/controller choices in `ai_decision_logs[]` so incidents can be audited later. This includes planning choices, repair attempts, merge decisions, and escalation handoffs. Decision logs must be concise audit rationales, not private chain-of-thought.
+
+Rules:
+
+- `ai_decision_logs[].source` must be `annotation`.
+- Decision logs explain why an action was chosen; they do not prove that the action worked.
+- Required fields: `id`, `phase`, `actor`, `decision`, `rationale`, `timestamp`, `source`.
+- Useful optional fields: `options_considered`, `selected_option`, `assumptions`, `risks`, `evidence_refs`, related requirement/task/finding IDs, and confidence.
+- Controller/CI loop decisions such as "run repair", "merge after green", "block merge", and "handoff to human" should be recorded automatically when a ledger is available.
+
+CLI:
+
+```bash
+python scripts/ledger_decision.py \
+  --ledger evidence-ledger.json \
+  --phase repair_attempt_1 \
+  --actor ai \
+  --decision "Fix failing typecheck before requesting review" \
+  --rationale "CI reported a type error and merge guard blocks non-green checks." \
+  --evidence-ref "checks[CHECK-typecheck]" \
+  --confidence high
+```
 
 ## Hard Rules
 

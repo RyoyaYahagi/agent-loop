@@ -77,6 +77,7 @@ def test_controller_escalates_without_repair_command_and_writes_handoff_report(t
     assert "no repair command configured" in report
     ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
     assert ledger["controller_events"][-1]["event"] == "escalated"
+    assert ledger["ai_decision_logs"][-1]["decision"] == "Stop repair loop and hand off to a human"
     assert ledger["repairs"][0]["status"] == "escalated"
 
 
@@ -113,6 +114,8 @@ ledger_path.write_text(json.dumps(ledger), encoding="utf-8")
     ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
     assert [entry["verdict"] for entry in ledger["evaluations"]] == ["FAIL", "PASS"]
     assert ledger["controller_events"][-1]["event"] == "pass"
+    assert any(entry["decision"] == "Run bounded repair command for evaluator failures" for entry in ledger["ai_decision_logs"])
+    assert ledger["ai_decision_logs"][-1]["decision"] == "Report PASS and stop repair loop"
     assert ledger["repairs"][0]["status"] == "completed"
 
 

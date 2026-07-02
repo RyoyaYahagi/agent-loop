@@ -72,6 +72,22 @@
       "evidence": []
     }
   ],
+  "ai_decision_logs": [
+    {
+      "id": "DECISION-001",
+      "phase": "plan",
+      "actor": "ai",
+      "decision": "Example: choose the minimal scoped implementation path",
+      "rationale": "Concise audit rationale; do not include private chain-of-thought.",
+      "options_considered": [],
+      "selected_option": null,
+      "assumptions": [],
+      "risks": [],
+      "evidence_refs": [],
+      "confidence": "medium",
+      "source": "annotation"
+    }
+  ],
   "regressions": {
     "new_failures": 0
   }

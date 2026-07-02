@@ -142,7 +142,17 @@ def initialize_ledger(
             "initialized_at": scope.get("initialized_at") or utc_now(),
         }
     )
-    for key in ("requirements", "tasks", "checks", "findings", "claims", "evaluations", "repairs", "usage_events"):
+    for key in (
+        "requirements",
+        "tasks",
+        "checks",
+        "findings",
+        "claims",
+        "evaluations",
+        "repairs",
+        "usage_events",
+        "ai_decision_logs",
+    ):
         value = ledger.setdefault(key, [])
         if not isinstance(value, list):
             raise ValueError(f"ledger.{key} must be a list")
